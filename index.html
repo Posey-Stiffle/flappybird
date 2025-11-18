@@ -7,7 +7,6 @@
     <!-- Import the p5.js library -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.9.0/p5.min.js"></script>
     <style>
-        /* Remove default margin and hide scrollbars */
         body {
             margin: 0;
             overflow: hidden;
@@ -18,31 +17,29 @@
 <body>
     <script>
         // --- Game Variables ---
-
         let bird;
         let pipes = [];
         
         // Game settings
-        const pipeSpeed = 3;
-        const pipeGap = 200;   // Space between top and bottom pipes
+        let basePipeSpeed = 3;         // Starting speed
+        let pipeSpeed;                 // Dynamic speed
+        const speedGrowthRate = 1.001; // How quickly speed increases
+        const pipeGap = 200;           // Space between top and bottom pipes
         const pipeWidth = 80;
-        const pipeFrequency = 120; // Add a new pipe every 140 frames
+        const pipeFrequency = 100;     // Add a new pipe every 100 frames
         const gravity = 0.6;
         const jump = -10;
         const gameOverHitCount = 5;
 
         // Game state
         let gameOver = false;
-        let hitPipes; // This will be a Set to store unique pipe IDs
+        let hitPipes; // Set to store unique pipe IDs
 
         // Game Over button properties
         let btnX, btnY, btnW, btnH;
 
         // --- p5.js Core Functions ---
 
-        /**
-         * Called once when the program starts.
-         */
         function setup() {
             createCanvas(windowWidth, windowHeight);
             
@@ -54,7 +51,6 @@
                 velocity: 0
             };
 
-            // Use a Set to store the IDs of pipes we've hit
             hitPipes = new Set();
             
             // Define button properties for the retry button
@@ -64,17 +60,16 @@
             btnY = height / 2 + 40;
         }
 
-        /**
-         * Called continuously, drawing each frame.
-         */
         function draw() {
             background(135, 206, 235); // Sky blue
 
+            // Exponentially increase pipe speed over time
+            pipeSpeed = basePipeSpeed * pow(speedGrowthRate, frameCount);
+            pipeSpeed = min(pipeSpeed, 20); // Cap the max speed so it’s not impossible
+
             if (gameOver) {
-                // If the game is over, stop all game logic and show the game over screen
                 drawGameOverScreen();
             } else {
-                // If the game is running:
                 updateBird();
                 drawBird();
                 managePipes();
@@ -82,198 +77,163 @@
             }
         }
 
-        /**
-         * Called once every time the mouse is pressed.
-         */
         function mousePressed() {
             if (gameOver) {
-                // If the game is over, check if the mouse is clicking the "Retry" button
+                // If game over, check if mouse is clicking the Retry button
                 if (mouseX > btnX && mouseX < btnX + btnW && mouseY > btnY && mouseY < btnY + btnH) {
-                    // Reload the webpage to restart the game
                     location.reload();
                 }
             } else {
-                // If the game is running, make the bird jump
+                // Flap up
                 bird.velocity = jump;
             }
         }
 
-        /**
-         * Called when the browser window is resized.
-         */
         function windowResized() {
             resizeCanvas(windowWidth, windowHeight);
-            // Recalculate button position
             btnX = width / 2 - btnW / 2;
             btnY = height / 2 + 40;
         }
 
-        // --- Game Logic Functions ---
+        // --- Game Logic ---
 
-        /**
-         * Updates the bird's position and velocity based on gravity.
-         */
         function updateBird() {
             bird.velocity += gravity;
             bird.y += bird.velocity;
-            bird.velocity *= 0.95; // A little air resistance
-
-            // Prevent the bird from going off the top or bottom of the screen
+            bird.velocity *= 0.95; // Air resistance
             bird.y = constrain(bird.y, bird.size / 2, height - bird.size / 2);
         }
 
-        /**
-         * Generates, updates, and draws the pipes.
-         */
         function managePipes() {
-            // Add a new pipe every 'pipeFrequency' frames
+            // Add new pipe every 'pipeFrequency' frames
             if (frameCount % pipeFrequency === 0) {
                 let topHeight = random(100, height - 100 - pipeGap);
                 pipes.push({
                     x: width,
                     topHeight: topHeight,
-                    id: frameCount, // Use frameCount as a unique ID
+                    id: frameCount, // Unique ID
                     isHit: false
                 });
             }
 
-            // Loop through all pipes (from back to front for safe removal)
+            // Loop through pipes (back to front)
             for (let i = pipes.length - 1; i >= 0; i--) {
                 let pipe = pipes[i];
-                pipe.x -= pipeSpeed; // Move pipe to the left
+                pipe.x -= pipeSpeed; // Move pipe based on growing speed
 
-                // Check for collision *before* drawing
-                if (!pipe.isHit) {
-                    if (checkCollision(bird, pipe)) {
-                        pipe.isHit = true;
-                        hitPipes.add(pipe.id); // Add this pipe's unique ID to the set
-                        
-                        // Check if we've hit the game-over limit
-                        if (hitPipes.size >= gameOverHitCount) {
-                            gameOver = true;
-                        }
+                // Check for collision before drawing
+                if (!pipe.isHit && checkCollision(bird, pipe)) {
+                    pipe.isHit = true;
+                    hitPipes.add(pipe.id);
+
+                    if (hitPipes.size >= gameOverHitCount) {
+                        gameOver = true;
                     }
                 }
 
-                // Set pipe color
+                // Pipe color
                 if (pipe.isHit) {
-                    fill(255, 0, 0, 200); // Red and slightly transparent if hit
+                    fill(255, 0, 0, 200); // Red if hit
                 } else {
                     fill(0, 200, 0); // Green
                 }
+
                 stroke(0);
                 strokeWeight(2);
 
-                // Draw the top pipe
+                // Draw pipes
                 rect(pipe.x, 0, pipeWidth, pipe.topHeight);
-                // Draw the bottom pipe
                 rect(pipe.x, pipe.topHeight + pipeGap, pipeWidth, height - pipe.topHeight - pipeGap);
 
-                // If pipe is off-screen, remove it
+                // Remove off-screen pipes
                 if (pipe.x < -pipeWidth) {
                     pipes.splice(i, 1);
                 }
             }
         }
 
-        /**
-         * Checks for collision between the bird (circle) and a pipe (two rectangles).
-         * Uses simple Axis-Aligned Bounding Box (AABB) collision.
-         */
+        // --- Collision Detection ---
+
         function checkCollision(b, p) {
-            // Bird's bounding box
+            // Bird bounding box
             let b_left = b.x - b.size / 2;
             let b_right = b.x + b.size / 2;
             let b_top = b.y - b.size / 2;
             let b_bottom = b.y + b.size / 2;
 
-            // Top pipe's bounding box
+            // Top pipe
             let p_top_left = p.x;
             let p_top_right = p.x + pipeWidth;
-            let p_top_top = 0;
             let p_top_bottom = p.topHeight;
 
-            // Bottom pipe's bounding box
+            // Bottom pipe
             let p_bottom_left = p.x;
             let p_bottom_right = p.x + pipeWidth;
             let p_bottom_top = p.topHeight + pipeGap;
-            let p_bottom_bottom = height;
 
-            // Check for collision with top pipe
-            let hitsTop = (b_left < p_top_right && b_right > p_top_left && b_top < p_top_bottom && b_bottom > p_top_top);
-            
-            // Check for collision with bottom pipe
-            let hitsBottom = (b_left < p_bottom_right && b_right > p_bottom_left && b_top < p_bottom_bottom && b_bottom > p_bottom_top);
+            // Check overlap
+            let hitsTop = (b_left < p_top_right && b_right > p_top_left && b_top < p_top_bottom);
+            let hitsBottom = (b_left < p_bottom_right && b_right > p_bottom_left && b_bottom > p_bottom_top);
 
             return hitsTop || hitsBottom;
         }
 
-        // --- Drawing Functions ---
+        // --- Drawing ---
 
-        /**
-         * Draws the bird (circle) and its beak (triangle).
-         */
         function drawBird() {
-            fill(255, 255, 0); // Yellow
+            // Body
+            fill(255, 255, 0);
             stroke(0);
             strokeWeight(2);
-            
-            // Body
             ellipse(bird.x, bird.y, bird.size, bird.size);
-            
-            // Beak (triangle)
-            fill(255, 165, 0); // Orange
-            let beakSize = bird.size / 3;
+
+            // Beak with black lineart
+            fill(255, 165, 0);
+            stroke(0);
+            strokeWeight(2);
+            let beakLength = bird.size / 3;
+            let beakHeight = bird.size / 3;
+            let baseX = bird.x + bird.size / 2;
+            let tipX = baseX + beakLength;
+
             triangle(
-                bird.x + bird.size / 2 - 4, bird.y, // Point attached to body
-                bird.x + bird.size / 2 + beakSize, bird.y - beakSize / 2, // Top point
-                bird.x + bird.size / 2 + beakSize, bird.y + beakSize / 2  // Bottom point
+                baseX, bird.y - beakHeight / 2,
+                baseX, bird.y + beakHeight / 2,
+                tipX, bird.y
             );
         }
 
-        /**
-         * Draws the "Pipes Hit" counter in the top-left corner.
-         */
         function drawHitCount() {
             fill(255);
             stroke(0);
             strokeWeight(3);
             textSize(32);
             textAlign(LEFT, TOP);
-            text("Lives Left: " + hitPipes.size + " / " + gameOverHitCount, 10, 10);
+            text("Lives Lost: " + hitPipes.size + " / " + gameOverHitCount, 10, 10);
         }
 
-        /**
-         * Draws the "Game Over" screen with the "Retry" button.
-         */
         function drawGameOverScreen() {
-            // Dark overlay
             fill(0, 0, 0, 150);
             rect(0, 0, width, height);
 
-            // "Game Over" text
             fill(255, 0, 0);
             noStroke();
             textSize(64);
             textAlign(CENTER, CENTER);
             text("Game Over", width / 2, height / 2 - 80);
 
-            // Final score
             fill(255);
             textSize(32);
             text("You lost all " + hitPipes.size + " lives!", width / 2, height / 2 - 10);
 
-            // Retry Button
-            fill(100, 255, 100); // Green button
+            fill(100, 255, 100);
             stroke(0);
             strokeWeight(2);
-            rect(btnX, btnY, btnW, btnH, 10); // Rounded corners
+            rect(btnX, btnY, btnW, btnH, 10);
 
-            // Button text
             fill(0);
             noStroke();
             textSize(28);
-            textAlign(CENTER, CENTER);
             text("Retry", width / 2, btnY + btnH / 2 + 2);
         }
     </script>
